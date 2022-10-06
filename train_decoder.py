@@ -24,7 +24,7 @@ import logging
 # 5. Note that this dataset class takes shape index and it does not iterate over all data points. 
 #    Also, no guarantee that each data point is processed only once per epoch
 class ChairDataset(Dataset):
-    def __init__(self, file_paths, n_points_to_load):
+    def __init__(self, file_paths, n_points_to_load, load_pos_neg):
         self.file_paths = file_paths
         self.n_points_per_shape = 50000
         
@@ -34,27 +34,47 @@ class ChairDataset(Dataset):
                     f"{self.n_points_per_shape} data points expected, got: {training_set['points']}"
                 
         self.n_points_to_load = n_points_to_load # number of points to load at once 
+        self.load_pos_neg = load_pos_neg
         
-    def __getitem__(self, shape_idx):        
-        training_set = np.load(self.file_paths[shape_idx]) # TODO: try mmap_mode='r'
-        points = training_set['points']
-        sdfs = training_set['sdf']
-        
-        n_shape_idx = np.full((self.n_points_to_load, 1), shape_idx, dtype=int)
-        
-        # randomly pick 'n_points_to_load number' of indices  
-        n_rand = random.sample(range(self.n_points_per_shape), self.n_points_to_load) 
-        n_points = points[n_rand]
-        n_sdf = sdfs[n_rand]
+    def __getitem__(self, shape_idx):
+        if self.load_pos_neg:
+            self.n_points_to_load = math.floor(self.n_points_to_load/2) * 2
 
-        # DeepSDF method
-        # random_pos = (torch.rand(self.n_points_to_load) * self.n_points_per_shape).long() 
-        # n_points = torch.index_select(torch.from_numpy(points), 0, random_pos)
-        # n_sdf = torch.index_select(torch.from_numpy(sdfs), 0, random_pos)
+            pos_training_set = np.load(os.path.join(self.file_paths[shape_idx].rsplit('/', 1)[0], 'pos_sdf_samples.npz'))
+            pos_points = pos_training_set['points']
+            pos_sdfs = pos_training_set['sdf']
+            assert int(self.n_points_to_load/2) < len(pos_points), 'not enough positive sdf points'
+            n_rand = random.sample(range(len(pos_points)), int(self.n_points_to_load/2))
+            n_pos_points = pos_points[n_rand]
+            n_pos_sdfs = pos_sdfs[n_rand]
 
-        n_sdf = np.resize(n_sdf, (self.n_points_to_load, 1))
-        
-        return n_shape_idx, n_points, n_sdf
+            neg_training_set = np.load(os.path.join(self.file_paths[shape_idx].rsplit('/', 1)[0], 'neg_sdf_samples.npz'))
+            neg_points = neg_training_set['points']
+            neg_sdfs = neg_training_set['sdf']
+            assert int(self.n_points_to_load/2) < len(neg_points), 'not enough negative sdf points'
+            n_rand = random.sample(range(len(neg_points)), int(self.n_points_to_load/2))
+            n_neg_points = neg_points[n_rand]
+            n_neg_sdfs = neg_sdfs[n_rand]
+            
+            n_shape_idx = np.full((self.n_points_to_load, 1), shape_idx, dtype=int)
+            n_points = np.concatenate((n_pos_points, n_neg_points), axis = 0)
+            n_sdfs = np.concatenate((n_pos_sdfs, n_neg_sdfs), axis = 0)
+            n_sdfs = np.resize(n_sdfs, (self.n_points_to_load, 1))
+            
+        else:
+            training_set = np.load(self.file_paths[shape_idx]) # TODO: try mmap_mode='r'
+            points = training_set['points']
+            sdfs = training_set['sdf']
+
+            n_shape_idx = np.full((self.n_points_to_load, 1), shape_idx, dtype=int)
+
+            # randomly pick 'n_points_to_load number' of indices  
+            n_rand = random.sample(range(self.n_points_per_shape), self.n_points_to_load) 
+            n_points = points[n_rand]
+            n_sdfs = sdfs[n_rand]
+            n_sdfs = np.resize(n_sdfs, (self.n_points_to_load, 1))
+
+        return n_shape_idx, n_points, n_sdfs
     
     def __len__(self):
         return len(self.file_paths)
@@ -69,14 +89,14 @@ def load_files(all_file_or_not, n_files = 0):
         for sub_dir in os.scandir(main_dir):
             if sub_dir.is_dir():
                 for file in os.listdir(main_dir + sub_dir.name):
-                    file_paths.append(main_dir + sub_dir.name + '/' + file) if file.endswith("sdf_samples.npz") else None
+                    file_paths.append(main_dir + sub_dir.name + '/' + file) if file == "sdf_samples.npz" else None
             n_files += 1
             
     else: # loading specific # of files
         for sub_dir in os.scandir(main_dir):
             if sub_dir.is_dir():
                 for file in os.listdir(main_dir + sub_dir.name):
-                    file_paths.append(main_dir + sub_dir.name + '/' + file) if file.endswith("sdf_samples.npz") else None
+                    file_paths.append(main_dir + sub_dir.name + '/' + file) if file == "sdf_samples.npz" else None
             if len(file_paths) == n_files:
                 break
     
@@ -186,10 +206,10 @@ def main_function(n_points_per_shape,
                   n_points_to_load, batch_size, 
                   n_iters, n_epochs, lr, shape_code_lr, lr_schedule, sigma, use_reg,
                   shape_code_length, n_inner_nodes, dropout, dropout_prob, weight_norm, use_tanh,
-                  load_all_shapes, n_shapes,
-                  main_dir):
+                  load_all_shapes, n_shapes, load_pos_neg,
+                  main_dir, continue_training=None):
 
-    logging.info(f"training samples: load_all_shapes = {load_all_shapes}, n_shapes = {n_shapes}")
+    logging.info(f"training samples: load_all_shapes = {load_all_shapes}, n_shapes = {n_shapes}, load_pos_neg = {load_pos_neg}")
     file_paths = load_files(load_all_shapes, n_shapes)
 
     logging.info(f"decoder network: shape_code_length = {shape_code_length}, " +
@@ -207,7 +227,7 @@ def main_function(n_points_per_shape,
                 weight_norm=weight_norm,
                 use_tanh=use_tanh).cuda()
 
-    dataset = ChairDataset(file_paths=file_paths, n_points_to_load=n_points_to_load)
+    dataset = ChairDataset(file_paths=file_paths, n_points_to_load=n_points_to_load, load_pos_neg=load_pos_neg)
     dataloader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True, drop_last=True) 
 
     shape_codes = nn.Embedding(len(file_paths), shape_code_length).cuda() # shape code as an embedding
@@ -226,12 +246,19 @@ def main_function(n_points_per_shape,
                  f"lr = {lr}, " + 
                  f"shape_code_lr = {shape_code_lr}, " +
                  f"lr_schedule = {lr_schedule}, " +
-                 f"sigma = {sigma}")
+                 f"sigma = {sigma}," + 
+                 f"use_reg = {use_reg}")
 
     criterion = nn.L1Loss()
 
     optimizer = torch.optim.Adam([{'params': model.parameters(),'lr':lr}, 
                                   {'params': shape_codes.parameters(), 'lr': shape_code_lr}])
+
+    if continue_training is not None:
+        logging.info(f"Continue training from {continue_training}")
+        continue_training_datetime = continue_training.rsplit('_', 1)[0].strip()
+        model.load_state_dict(torch.load(f'./models/{continue_training_datetime}/autodecoder_{continue_training}'))
+        shape_codes.load_state_dict(torch.load(f'./models/{continue_training_datetime}/shapecode_{continue_training}'))
 
 
     ########## training starts here ##########
@@ -283,11 +310,12 @@ def main_function(n_points_per_shape,
 
         train_loss_ave = train_loss/(n_iters*(len(dataloader.dataset)*n_points_to_load))        
         logging.info(f"{epoch} loss = {train_loss_ave}")
-        if epoch == n_epochs-1: ####
+        if epoch%10 == 0: 
             torch.save(model.state_dict(), main_dir + '/autodecoder_' + now + f'_{epoch}')
             torch.save(shape_codes.state_dict(), main_dir + '/shapecode_' + now + f'_{epoch}')
 
         with torch.no_grad(): # validation
+            model.eval() #TODO: eval() doesn't work for F.dropout()
             for i in range(3): # do validation n times 
                 n_points_to_generate=1000
                 val_idx, val_points, val_sdfs = generate_validation_points(file_paths, n_points_per_shape, n_points_to_generate)
@@ -305,6 +333,7 @@ def main_function(n_points_per_shape,
                 val_sdfs_pred = model(val_shape_codes_with_xyz)
                 val_loss = criterion(torch.clamp(val_sdfs, -0.1, 0.1), torch.clamp(val_sdfs_pred, -0.1, 0.1))
                 logging.info(f'Validation: shape {val_idx[0]}, loss for 1000 random points: {val_loss}')
+            model.train()
         
     training_end_time = datetime.now()
     elapsed_sec = training_end_time - training_start_time
@@ -319,17 +348,17 @@ if __name__ == "__main__":
     os.mkdir(main_dir)
     configure_logging("DEBUG", main_dir + f'/autodecoder_{now}.log')
     main_function(n_points_per_shape = 50000,
-                 n_points_to_load = 16384,  # n points loaded at once from a single file
-                 batch_size = 1, # batch_size = n shapes loaded in one batch, not n data points
+                 n_points_to_load = 4096, ####  # n points loaded at once from a single file
+                 batch_size = 64, #### # batch_size = n shapes loaded in one batch, not n data points
                   
                  # n_iters = math.ceil(n_points_per_shape/n_points_to_load) # eg 50000/1024 = 49..
                  # rigor = 1 # to account for randomness
                  # n_iters = n_iters * rigor
                  n_iters = 1,
-                 n_epochs = 3000,
+                 n_epochs = 3000 + 1, ####
 
-                 lr = 1e-4 * 5,
-                 shape_code_lr = 1e-3,
+                 lr = 1e-4 * 5 * 0.5 * 0.5, 
+                 shape_code_lr = 1e-3 * 0.5 * 0.5,
                  lr_schedule = True,
                  # betas = (0.9, 0.9), # origignally: (0.9, 0.999)
                  # eps = 1e-08 * 10, # originally: 1e-08
@@ -339,15 +368,19 @@ if __name__ == "__main__":
 
                  shape_code_length = 256,
                  n_inner_nodes = 512,
-                 dropout = True, 
+                 dropout = False, 
                  dropout_prob = 0.2, 
                  weight_norm = False, 
                  use_tanh = False,
                  
-                 load_all_shapes = False,
-                 n_shapes = 1,
+                 load_all_shapes = True,
+                 n_shapes = 7000,
                  
-                 main_dir = main_dir)
+                 load_pos_neg = True,
+                 
+                 main_dir = main_dir,
+                 
+                 continue_training = '09142022_095844_910')
 
 
 
