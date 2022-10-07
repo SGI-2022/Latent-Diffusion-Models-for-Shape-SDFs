@@ -2,7 +2,7 @@
   "Description" : [ "This experiment learns a shape representation for chairs ",
                     "using data from ShapeNet version 2." ],
   "DataSource" : "data",
-  "TrainSplit" : "examples/splits/sv2_chairs_train.json",
+  "TrainSplit" : "examples/chairs/chairs_train.json",
   "TestSplit" : "examples/splits/sv2_chairs_test.json",
   "NetworkArch" : "deep_sdf_decoder",
   "NetworkSpecs" : {
@@ -12,8 +12,8 @@
     "norm_layers" : [0, 1, 2, 3, 4, 5, 6, 7],
     "latent_in" : [4],
     "xyz_in_all" : false,
-    "use_tanh" : false,
-    "latent_dropout" : false,
+    "use_tanh" : true,
+    "latent_dropout" : true,
     "weight_norm" : true
     },
   "CodeLength" : 256,
@@ -35,7 +35,7 @@
     }],
   "SamplesPerScene" : 16384,
   "ScenesPerBatch" : 64,
-  "DataLoaderThreads" : 16,
+  "DataLoaderThreads" : 8,
   "ClampingDistance" : 0.1,
   "CodeRegularization" : true,
   "CodeRegularizationLambda" : 1e-4,

@@ -1,0 +1,80 @@
+DeepSdf - DEBUG - running examples/chairs
+DeepSdf - INFO - Experiment description: 
+This experiment learns a shape representation for chairs using data from ShapeNet version 2.
+DeepSdf - DEBUG - {'dims': [512, 512, 512, 512, 512, 512, 512, 512], 'dropout': [0, 1, 2, 3, 4, 5, 6, 7], 'dropout_prob': 0.2, 'norm_layers': [0, 1, 2, 3, 4, 5, 6, 7], 'latent_in': [4], 'xyz_in_all': False, 'use_tanh': True, 'latent_dropout': True, 'weight_norm': True}
+DeepSdf - INFO - training with 1 GPU(s)
+DeepSdf - DEBUG - using 6278 shapes from data source data
+DeepSdf - INFO - There are 6278 scenes
+DeepSdf - DEBUG - loading data with 8 threads
+DeepSdf - DEBUG - torch num_threads: 4
+DeepSdf - DEBUG - DataParallel(
+  (module): Decoder(
+    (lat_dp): Dropout(p=0.2, inplace=False)
+    (lin0): Linear(in_features=259, out_features=512, bias=True)
+    (lin1): Linear(in_features=512, out_features=512, bias=True)
+    (lin2): Linear(in_features=512, out_features=512, bias=True)
+    (lin3): Linear(in_features=512, out_features=253, bias=True)
+    (lin4): Linear(in_features=512, out_features=512, bias=True)
+    (lin5): Linear(in_features=512, out_features=512, bias=True)
+    (lin6): Linear(in_features=512, out_features=512, bias=True)
+    (lin7): Linear(in_features=512, out_features=512, bias=True)
+    (lin8): Linear(in_features=512, out_features=1, bias=True)
+    (tanh): Tanh()
+    (relu): ReLU()
+    (th): Tanh()
+  )
+)
+DeepSdf - DEBUG - initialized with mean magnitude 0.9992164969444275
+DeepSdf - INFO - starting from epoch 1
+DeepSdf - INFO - Number of decoder parameters: 1843195
+DeepSdf - INFO - Number of shape code parameters: 1607168 (# codes 6278, code dim 256)
+DeepSdf - INFO - epoch 1...
+DeepSdf - DEBUG - running examples/chairs
+DeepSdf - INFO - Experiment description: 
+This experiment learns a shape representation for chairs using data from ShapeNet version 2.
+DeepSdf - DEBUG - {'dims': [512, 512, 512, 512, 512, 512, 512, 512], 'dropout': [0, 1, 2, 3, 4, 5, 6, 7], 'dropout_prob': 0.2, 'norm_layers': [0, 1, 2, 3, 4, 5, 6, 7], 'latent_in': [4], 'xyz_in_all': False, 'use_tanh': True, 'latent_dropout': True, 'weight_norm': True}
+DeepSdf - INFO - training with 1 GPU(s)
+DeepSdf - DEBUG - using 6278 shapes from data source data
+DeepSdf - INFO - There are 6278 scenes
+DeepSdf - DEBUG - loading data with 8 threads
+DeepSdf - DEBUG - torch num_threads: 4
+DeepSdf - DEBUG - DataParallel(
+  (module): Decoder(
+    (lat_dp): Dropout(p=0.2, inplace=False)
+    (lin0): Linear(in_features=259, out_features=512, bias=True)
+    (lin1): Linear(in_features=512, out_features=512, bias=True)
+    (lin2): Linear(in_features=512, out_features=512, bias=True)
+    (lin3): Linear(in_features=512, out_features=253, bias=True)
+    (lin4): Linear(in_features=512, out_features=512, bias=True)
+    (lin5): Linear(in_features=512, out_features=512, bias=True)
+    (lin6): Linear(in_features=512, out_features=512, bias=True)
+    (lin7): Linear(in_features=512, out_features=512, bias=True)
+    (lin8): Linear(in_features=512, out_features=1, bias=True)
+    (tanh): Tanh()
+    (relu): ReLU()
+    (th): Tanh()
+  )
+)
+DeepSdf - DEBUG - initialized with mean magnitude 0.9999973773956299
+DeepSdf - INFO - starting from epoch 1
+DeepSdf - INFO - Number of decoder parameters: 1843195
+DeepSdf - INFO - Number of shape code parameters: 1607168 (# codes 6278, code dim 256)
+DeepSdf - INFO - epoch 1...
+DeepSdf - DEBUG - loss = 0.04538648668676615
+DeepSdf - DEBUG - loss = 0.01141865598037839
+DeepSdf - DEBUG - loss = 0.034268676303327084
+DeepSdf - DEBUG - loss = 0.03232376277446747
+DeepSdf - DEBUG - loss = 0.021576301660388708
+DeepSdf - DEBUG - loss = 0.010691556613892317
+DeepSdf - DEBUG - loss = 0.013834409648552537
+DeepSdf - DEBUG - loss = 0.018540979363024235
+DeepSdf - DEBUG - loss = 0.018521211575716734
+DeepSdf - DEBUG - loss = 0.01547845616005361
+DeepSdf - DEBUG - loss = 0.011057637399062514
+DeepSdf - DEBUG - loss = 0.009700661757960916
+DeepSdf - DEBUG - loss = 0.012149460148066282
+DeepSdf - DEBUG - loss = 0.013888453366234899
+DeepSdf - DEBUG - loss = 0.013658714480698109
+DeepSdf - DEBUG - loss = 0.011788199422881007
+DeepSdf - DEBUG - loss = 0.00990818627178669
+DeepSdf - DEBUG - loss = 0.00950820418074727
