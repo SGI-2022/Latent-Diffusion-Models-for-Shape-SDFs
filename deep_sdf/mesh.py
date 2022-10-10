@@ -18,6 +18,9 @@ def create_mesh(
     ply_filename = filename
 
     decoder.eval()
+    
+    decoder = decoder.cuda()
+    latent_vec = latent_vec.cuda()
 
     # NOTE: the voxel_origin is actually the (bottom, left, down) corner, not the middle
     voxel_origin = [-1, -1, -1]
@@ -61,7 +64,7 @@ def create_mesh(
     end = time.time()
     print("sampling takes: %f" % (end - start))
 
-    convert_sdf_samples_to_ply(
+    mesh_points, faces = convert_sdf_samples_to_ply(
         sdf_values.data.cpu(),
         voxel_origin,
         voxel_size,
@@ -69,6 +72,8 @@ def create_mesh(
         offset,
         scale,
     )
+    
+    return mesh_points, faces
 
 
 def convert_sdf_samples_to_ply(
@@ -93,7 +98,7 @@ def convert_sdf_samples_to_ply(
 
     numpy_3d_sdf_tensor = pytorch_3d_sdf_tensor.numpy()
 
-    verts, faces, normals, values = skimage.measure.marching_cubes_lewiner(
+    verts, faces, normals, values = skimage.measure.marching_cubes(
         numpy_3d_sdf_tensor, level=0.0, spacing=[voxel_size] * 3
     )
 
@@ -137,3 +142,5 @@ def convert_sdf_samples_to_ply(
             time.time() - start_time
         )
     )
+    
+    return mesh_points, faces

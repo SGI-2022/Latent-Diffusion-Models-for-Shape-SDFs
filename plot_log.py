@@ -78,6 +78,8 @@ def load_logs(experiment_directory, type):
     ax.grid()
     plt.show()
 
+    return np.arange(num_iters) / iters_per_epoch, logs["loss"], np.arange(20, num_iters - 20) / iters_per_epoch, smoothed_loss_41, np.arange(800, num_iters - 800) / iters_per_epoch, smoothed_loss_1601
+
 
 if __name__ == "__main__":
 

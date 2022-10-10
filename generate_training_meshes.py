@@ -11,7 +11,7 @@ import deep_sdf
 import deep_sdf.workspace as ws
 
 
-def code_to_mesh(experiment_directory, checkpoint, keep_normalized=False):
+def code_to_mesh(experiment_directory, checkpoint, keep_normalized=False, shape_index="all"):
 
     specs_filename = os.path.join(experiment_directory, "specs.json")
 
@@ -50,13 +50,17 @@ def code_to_mesh(experiment_directory, checkpoint, keep_normalized=False):
 
     data_source = specs["DataSource"]
 
-    instance_filenames = deep_sdf.data.get_instance_filenames(data_source, train_split)
+    instance_filenames = deep_sdf.data.get_instance_filenames(data_source, train_split) # shape filenames
 
     print(len(instance_filenames), " vs ", len(latent_vectors))
 
     for i, latent_vector in enumerate(latent_vectors):
-
-        dataset_name, class_name, instance_name = instance_filenames[i].split("/")
+        
+        if (shape_index != "all") and (i != int(shape_index)): continue
+        
+        dataset_name = instance_filenames[i].split("/")[-3]
+        class_name = instance_filenames[i].split("/")[-2]
+        instance_name = instance_filenames[i].split("/")[-1]
         instance_name = instance_name.split(".")[0]
 
         print("{} {} {}".format(dataset_name, class_name, instance_name))
@@ -75,12 +79,12 @@ def code_to_mesh(experiment_directory, checkpoint, keep_normalized=False):
 
         mesh_filename = os.path.join(mesh_dir, instance_name)
 
-        print(instance_filenames[i])
+        print(mesh_filename)
 
         offset = None
         scale = None
 
-        if not keep_normalized:
+        if not keep_normalized: #TODO: this is broken, need fix
 
             normalization_params = np.load(
                 ws.get_normalization_params_filename(
@@ -91,7 +95,7 @@ def code_to_mesh(experiment_directory, checkpoint, keep_normalized=False):
             scale = normalization_params["scale"]
 
         with torch.no_grad():
-            deep_sdf.mesh.create_mesh(
+            mesh_points, faces = deep_sdf.mesh.create_mesh(
                 decoder,
                 latent_vector,
                 mesh_filename,
@@ -100,7 +104,8 @@ def code_to_mesh(experiment_directory, checkpoint, keep_normalized=False):
                 offset=offset,
                 scale=scale,
             )
-
+            
+    return mesh_points, faces
 
 if __name__ == "__main__":
 
@@ -130,10 +135,16 @@ if __name__ == "__main__":
         action="store_true",
         help="If set, keep the meshes in the normalized scale.",
     )
+    arg_parser.add_argument(
+        "--specify_shape_index",
+        dest="shape_index",
+        default="all",
+        help="If set, generate a mesh of the specific index.", #TODO: implement this
+    ) 
     deep_sdf.add_common_args(arg_parser)
 
     args = arg_parser.parse_args()
 
     deep_sdf.configure_logging(args)
 
-    code_to_mesh(args.experiment_directory, args.checkpoint, args.keep_normalized)
+    code_to_mesh(args.experiment_directory, args.checkpoint, args.keep_normalized, args.shape_index)
