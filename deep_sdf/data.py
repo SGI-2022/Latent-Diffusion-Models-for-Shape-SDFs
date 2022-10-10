@@ -15,11 +15,12 @@ import deep_sdf.workspace as ws
 # sdf file path example: latent_diffusion/latent_diffusion/data/03001627_sdfs/1006b...70d646/pos_sdf_samples.npz
 def get_instance_filenames(data_source, split):
     npzfiles = []
+    
     for dataset in split: # dataset = 'data'
         for class_name in split[dataset]: # class_name = '03001627_sdfs'
             for instance_name in split[dataset][class_name]: # eg. 1006b...70d646
                 instance_filename = os.path.join( 
-                    "../latent_diffusion", dataset, class_name, instance_name
+                    data_source, instance_name
                 ) 
 
                 # if not os.path.isfile(

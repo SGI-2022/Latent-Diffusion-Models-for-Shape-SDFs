@@ -248,14 +248,14 @@ def append_parameter_magnitudes(param_mag_log, model):
         param_mag_log[name].append(param.data.norm().item())
 
 
-def main_function(experiment_directory, continue_from, batch_split):
+def main_function(experiment_directory, continue_from, batch_split, data_source):
 
     logging.debug("running " + experiment_directory)
 
     specs = ws.load_experiment_specifications(experiment_directory)
     logging.info("Experiment description: \n" + specs["Description"][0] + specs["Description"][1])
 
-    data_source = specs["DataSource"]
+    # data_source = specs["DataSource"] # we are getting data_source from the command line arguments instead
     train_split_file = specs["TrainSplit"] 
 
     arch = __import__("networks." + specs["NetworkArch"], fromlist=["Decoder"])
@@ -581,6 +581,12 @@ if __name__ == "__main__":
         + "subbatches. This allows for training with large effective batch "
         + "sizes in memory constrained environments.",
     )
+    arg_parser.add_argument(
+        "--data_source",
+        dest="data_source",
+        required=True,
+        help="Specify a relative path to the folder that contains all datasets."
+    )
 
     deep_sdf.add_common_args(arg_parser)
 
@@ -588,4 +594,4 @@ if __name__ == "__main__":
 
     deep_sdf.configure_logging(args)
 
-    main_function(args.experiment_directory, args.continue_from, int(args.batch_split))
+    main_function(args.experiment_directory, args.continue_from, int(args.batch_split), args.data_source)
