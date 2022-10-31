@@ -1,3 +1,25 @@
+# How to run FB DeepSDF modified for our dataset
+
+1. Change `main_dir` in `preprocess_pos_neg_sdfs.ipynb` so that it points to the folder that contains the dataset and run `preprocess_pos_neg_sdfs.ipynb`.
+2. To run training, specify the relatize path to the dataset folder as a command line argument using the `--data_source` flag. For example, 
+```
+python train_deep_sdf.py -e examples/chairs --data_source "../latent_diffusion/data/03001627_sdfs"
+```
+or
+```
+python train_deep_sdf.py -e "examples/planes(new json)" --data_source "/mnt/disks/data2/latent_diffusion/02691156_sdfs_500k"
+```
+
+
+3. If you want to run a debug mode, 
+```
+python train_deep_sdf.py -e examples/chairs --debug --data_source "../latent_diffusion/data/03001627_sdfs"
+```
+4. If needed to specify the batch split, pass it as a command line argument using the --batch_split flag. 
+```
+python train_deep_sdf.py -e examples/chairs --batch_split 2 will split the batch size by 2.
+```
+
 # DeepSDF
 
 This is an implementation of the CVPR '19 paper "DeepSDF: Learning Continuous Signed Distance Functions for Shape Representation" by Park et al. See the paper [here][6]. 
