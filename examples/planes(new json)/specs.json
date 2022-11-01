@@ -35,7 +35,7 @@
     }],
   "SamplesPerScene" : 16384,
   "ScenesPerBatch" : 64,
-  "DataLoaderThreads" : 8,
+  "DataLoaderThreads" : 16,
   "ClampingDistance" : 0.1,
   "CodeRegularization" : true,
   "CodeRegularizationLambda" : 1e-4,
