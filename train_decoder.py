@@ -14,6 +14,7 @@ import math
 from itertools import chain as chain
 import torch.nn.functional as F
 import logging
+import json
 
 
 # Dataset Method 3:
@@ -24,9 +25,9 @@ import logging
 # 5. Note that this dataset class takes shape index and it does not iterate over all data points. 
 #    Also, no guarantee that each data point is processed only once per epoch
 class ChairDataset(Dataset):
-    def __init__(self, file_paths, n_points_to_load, load_pos_neg):
+    def __init__(self, file_paths, n_points_per_shape, n_points_to_load, load_pos_neg):
         self.file_paths = file_paths
-        self.n_points_per_shape = 50000
+        self.n_points_per_shape = n_points_per_shape
         
         for file_path in file_paths:
             training_set = np.load(file_path)
@@ -79,30 +80,32 @@ class ChairDataset(Dataset):
     def __len__(self):
         return len(self.file_paths)
     
-
-def load_files(all_file_or_not, n_files = 0):
-    file_paths = []
-    main_dir = '../data/03001627_sdfs/'
-
-    if all_file_or_not: # loading all files
-        n_files = 0
-        for sub_dir in os.scandir(main_dir):
-            if sub_dir.is_dir():
-                for file in os.listdir(main_dir + sub_dir.name):
-                    file_paths.append(main_dir + sub_dir.name + '/' + file) if file == "sdf_samples.npz" else None
-            n_files += 1
-            
-    else: # loading specific # of files
-        for sub_dir in os.scandir(main_dir):
-            if sub_dir.is_dir():
-                for file in os.listdir(main_dir + sub_dir.name):
-                    file_paths.append(main_dir + sub_dir.name + '/' + file) if file == "sdf_samples.npz" else None
-            if len(file_paths) == n_files:
-                break
     
-    print(f'total # of files: {n_files}')
+def load_files_by_uuid(main_dir, split_dir, filename):
+    """
+    main_dir: path to the dataset folder
+    split_dir: path to split json file
+    filename: choose from 'surface_samples.npz', 'sdf_samples.npz', or 'mesh.obj'
+    """
+
+    with open(split_dir, "r") as f:
+        train_split = json.load(f)
+
+    training_set_uuids = []
+    for dataset in train_split: # dataset = 'data'
+        for class_name in train_split[dataset]: # class_name = '03001627_sdfs'
+            for uuid in train_split[dataset][class_name]: # eg. 1006b...70d646
+                training_set_uuids.append(uuid)
+
+    file_paths = []
+    for uuid in training_set_uuids:
+        file_paths.append(os.path.join(main_dir, uuid, filename))
+
+    print(f"loaded {len(file_paths)} number of {filename} files")
+    
     return file_paths
 
+    
 # autodecoder MLP class (architecture reference: deepSDF paper)
 class MLP(nn.Module): #TODO: if dropout, dropout_prob, ...
     def __init__(self, n_shapes, shape_code_length, n_inner_nodes, 
@@ -206,11 +209,11 @@ def main_function(n_points_per_shape,
                   n_points_to_load, batch_size, 
                   n_iters, n_epochs, lr, shape_code_lr, lr_schedule, sigma, use_reg,
                   shape_code_length, n_inner_nodes, dropout, dropout_prob, weight_norm, use_tanh,
-                  load_all_shapes, n_shapes, load_pos_neg,
-                  main_dir, continue_training=None):
+                  load_pos_neg,
+                  main_dir, data_dir, split_dir, num_data_loader_threads, continue_training=None):
 
-    logging.info(f"training samples: load_all_shapes = {load_all_shapes}, n_shapes = {n_shapes}, load_pos_neg = {load_pos_neg}")
-    file_paths = load_files(load_all_shapes, n_shapes)
+    logging.info(f"dataset path = {data_dir}, training split path = {split_dir}, num_data_loader_threads = {num_data_loader_threads}, load_pos_neg = {load_pos_neg}")
+    file_paths = load_files_by_uuid(data_dir, split_dir, 'sdf_samples.npz')
 
     logging.info(f"decoder network: shape_code_length = {shape_code_length}, " +
                  f"n_inner_nodes = {n_inner_nodes}, " + 
@@ -226,9 +229,13 @@ def main_function(n_points_per_shape,
                 dropout_prob=dropout_prob,
                 weight_norm=weight_norm,
                 use_tanh=use_tanh).cuda()
+    
+    logging.info("training with {} GPU(s)".format(torch.cuda.device_count()))
+    model = torch.nn.DataParallel(model)
 
-    dataset = ChairDataset(file_paths=file_paths, n_points_to_load=n_points_to_load, load_pos_neg=load_pos_neg)
-    dataloader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True, drop_last=True) 
+    dataset = ChairDataset(file_paths=file_paths, n_points_per_shape=n_points_per_shape, n_points_to_load=n_points_to_load, load_pos_neg=load_pos_neg)
+    dataloader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True, drop_last=True, num_workers=num_data_loader_threads) 
+
 
     shape_codes = nn.Embedding(len(file_paths), shape_code_length).cuda() # shape code as an embedding
     shape_codes_mean = 0
@@ -246,7 +253,7 @@ def main_function(n_points_per_shape,
                  f"lr = {lr}, " + 
                  f"shape_code_lr = {shape_code_lr}, " +
                  f"lr_schedule = {lr_schedule}, " +
-                 f"sigma = {sigma}," + 
+                 f"sigma = {sigma}, " + 
                  f"use_reg = {use_reg}")
 
     criterion = nn.L1Loss()
@@ -306,8 +313,8 @@ def main_function(n_points_per_shape,
                 optimizer.step()
 
                 # update running training loss
-                train_loss += loss.item()*n_idx.size(0) # n_idx.size(0) = n_shapes in the batch * n_points_to_load
-
+                train_loss += loss.item()*n_idx.size(0) 
+    
         train_loss_ave = train_loss/(n_iters*(len(dataloader.dataset)*n_points_to_load))        
         logging.info(f"{epoch} loss = {train_loss_ave}")
         if epoch%10 == 0: 
@@ -316,7 +323,7 @@ def main_function(n_points_per_shape,
 
         with torch.no_grad(): # validation
             model.eval() #TODO: eval() doesn't work for F.dropout()
-            for i in range(3): # do validation n times 
+            for i in range(1): # do validation n times 
                 n_points_to_generate=1000
                 val_idx, val_points, val_sdfs = generate_validation_points(file_paths, n_points_per_shape, n_points_to_generate)
                 val_idx = val_idx.cuda()
@@ -347,8 +354,8 @@ if __name__ == "__main__":
     main_dir = f'./models/{now}'
     os.mkdir(main_dir)
     configure_logging("DEBUG", main_dir + f'/autodecoder_{now}.log')
-    main_function(n_points_per_shape = 50000,
-                 n_points_to_load = 4096, ####  # n points loaded at once from a single file
+    main_function(n_points_per_shape = 500000,
+                 n_points_to_load = 16384, ####  # n points loaded at once from a single file
                  batch_size = 64, #### # batch_size = n shapes loaded in one batch, not n data points
                   
                  # n_iters = math.ceil(n_points_per_shape/n_points_to_load) # eg 50000/1024 = 49..
@@ -357,8 +364,8 @@ if __name__ == "__main__":
                  n_iters = 1,
                  n_epochs = 3000 + 1, ####
 
-                 lr = 1e-4 * 5 * 0.5 * 0.5, 
-                 shape_code_lr = 1e-3 * 0.5 * 0.5,
+                 lr = 1e-4, 
+                 shape_code_lr = 1e-3,
                  lr_schedule = True,
                  # betas = (0.9, 0.9), # origignally: (0.9, 0.999)
                  # eps = 1e-08 * 10, # originally: 1e-08
@@ -372,16 +379,22 @@ if __name__ == "__main__":
                  dropout_prob = 0.2, 
                  weight_norm = False, 
                  use_tanh = False,
-                 
-                 load_all_shapes = True,
-                 n_shapes = 7000,
-                 
+                                  
                  load_pos_neg = True,
                  
                  main_dir = main_dir,
                  
-                 continue_training = '09142022_095844_910')
+                 data_dir =  '/mnt/disks/data2/latent_diffusion/03001627_sdfs_500k/',
+                 split_dir = '../DeepSDF2/examples/chairs(batch size 8)/chairs_train.json',
+                 num_data_loader_threads = 16)
 
+# <chairs>
+# data_dir = '/mnt/disks/data2/latent_diffusion/03001627_sdfs_500k/'
+# split_dir = '../DeepSDF2/examples/chairs(batch size 8)/chairs_train.json'
+
+# <planes>
+# data_dir = '/mnt/disks/data2/latent_diffusion/02691156_sdfs_500k/'
+# split_dir = '../DeepSDF2/examples/planes(new json)/planes_train.json'
 
 
     
