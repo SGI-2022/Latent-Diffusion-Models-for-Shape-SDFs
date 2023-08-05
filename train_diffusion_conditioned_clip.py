@@ -14,24 +14,73 @@ import random
 import math
 import logging
 from tools import *
+import clip
+from pytorch3d.renderer import (
+    FoVPerspectiveCameras, look_at_view_transform,
+    RasterizationSettings, BlendParams,
+    MeshRenderer, MeshRasterizer, HardPhongShader, TexturesVertex
+)
+from pytorch3d.io import load_obj
+from pytorch3d.structures import Meshes
+from PIL import Image
+import wandb
 
-# def noise_estimation_loss(model, x_0,noise_steps):
-def noise_estimation_loss(model, x_0, n_steps, alphas_bar_sqrt, one_minus_alphas_bar_sqrt):
+class ConditionalLinear(nn.Module):
+    def __init__(self, num_in, num_in_clip, num_out, n_steps, temb_ch):
+        super(ConditionalLinear, self).__init__()
+        self.num_out = num_out
+        self.lin = nn.Linear(num_in, num_out)
+        self.lin_clip = nn.Linear(num_in_clip, num_out)
+        # self.embed = nn.Embedding(n_steps, num_out)
+        # self.embed.weight.data.uniform_()
 
-    batch_size = x_0.shape[0]
-    # Select a random step for each example
-    t = torch.randint(0, n_steps, size=(batch_size // 2 + 1,)) # pick (batch_size//2+1) number of rand integers in bw 0 and n_steps
-    t = torch.cat([t, n_steps - t - 1], dim=0)[:batch_size].long().cuda() # pick other time index symmetrically
-    # x0 multiplier
-    a = extract(alphas_bar_sqrt, t, x_0).cuda()
-    # eps multiplier
-    am1 = extract(one_minus_alphas_bar_sqrt, t, x_0).cuda()
-    e = torch.randn_like(x_0).cuda()
-    # e = noise_steps[t, :,:]
-    # model input
-    x = x_0 * a + e * am1
-    output = model(x, t)
-    return (e - output).square().mean()
+        self.temb_proj = torch.nn.Linear(temb_ch,
+                                         num_out)
+        self.nonlin = torch.nn.SiLU()
+
+
+    def forward(self, x, y, c):
+        out = self.lin(x)
+        out = self.temb_proj(self.nonlin(y)) + out
+        
+        out = self.lin_clip(c) + out
+        return out
+    
+class ConditionalModel(nn.Module):
+    def __init__(self, n_steps, ch=32, num_out=64):
+        super(ConditionalModel, self).__init__()
+        self.ch = ch
+        self.temb_ch = ch * 4 # time embedding channel
+        self.lin1 = ConditionalLinear(256,512,512, n_steps, self.temb_ch)
+        self.lin2 = ConditionalLinear(512,512, 512, n_steps, self.temb_ch)
+        self.lin3 = ConditionalLinear(512*2,512, 512, n_steps, self.temb_ch)
+        self.lin4 = ConditionalLinear(512,512, 512, n_steps, self.temb_ch)
+        self.lin5 = ConditionalLinear(512*2,512, 512, n_steps, self.temb_ch)
+        self.lin6 = ConditionalLinear(512,512, 512, n_steps, self.temb_ch)
+        self.lin7 = ConditionalLinear(512*2,512, 512, n_steps, self.temb_ch)
+        self.lin8 = nn.Linear(512,256)
+
+
+        # timestep embedding
+        self.temb = nn.Sequential(
+            torch.nn.Linear(ch,
+                            self.temb_ch),
+            torch.nn.SiLU(),
+            torch.nn.Linear(self.temb_ch,
+                            self.temb_ch),
+        )
+    
+    def forward(self, x, y, c): # x, t
+        y = get_timestep_embedding(y, self.ch)
+        temb = self.temb(y)
+        x1 = F.softplus(self.lin1(x, temb, c))
+        x = F.softplus(self.lin2(x1, temb, c))
+        x = F.softplus(self.lin3(torch.cat((x, x1), dim=1), temb, c))
+        x = F.softplus(self.lin4(x, temb, c))
+        x = F.softplus(self.lin5(torch.cat((x, x1), dim=1), temb, c))
+        x = F.softplus(self.lin6(x, temb, c))
+        x = F.softplus(self.lin7(torch.cat((x, x1), dim=1), temb, c))
+        return self.lin8(x)
 
 class EMA(object): # Stabilizing training
     def __init__(self, mu=0.999):
@@ -66,23 +115,45 @@ class EMA(object): # Stabilizing training
     def load_state_dict(self, state_dict):
         self.shadow = state_dict
 
-        
-        
-def main():
+def noise_estimation_loss(model, x_0, x_cond0,clip_cond, n_steps, alphas_bar_sqrt, one_minus_alphas_bar_sqrt):
 
+    batch_size = x_0.shape[0]
+    # Select a random step for each example
+    t = torch.randint(0, n_steps, size=(batch_size // 2 + 1,)) # pick (batch_size//2+1) number of rand integers in bw 0 and n_steps
+    t = torch.cat([t, n_steps - t - 1], dim=0)[:batch_size].long().cuda() # pick other time index symmetrically
+    # x0 multiplier
+    #t_prev=torch.clip(t-1, min=0)
+    a = extract(alphas_bar_sqrt, t, x_0).cuda()
+    a1 = extract(alphas_bar_sqrt, t, x_cond0).cuda()
+    # eps multiplier
+    am1 = extract(one_minus_alphas_bar_sqrt, t, x_0).cuda()
+    e = torch.randn_like(x_0).cuda()
+    # e = noise_steps[t, :,:]
+    # model input
+    x = x_0 * a + e * am1
+    x_cond = x_cond0*a1
+    output = model(x, t, clip_cond)
+    #err = e-output
+    #eps1 = e - output
+    #eps2 = x_cond - x
+    err = x_cond-x+ output*am1
+    return (err).square().mean()
+
+def main():
+    wandb.init(project="diffusion_on_clip")
     ################ 1. define decoder_type and model_datetime ################
     
     # load the decoder model & latent vectors
     decoder_type = "deep_sdf"  # choose either "SGI" (for the decoder model we implemented) or "deep_sdf" (for the official facebook repo decoder model)
     
     if decoder_type == "SGI": 
-        model_datetime = '09152022_190445'
+        model_datetime = '11012022_133638'
         shapecode, shapecode_epoch, shape_indices = get_shapecode(model_datetime, n_shapes=(6778-500)) # specify shapecode_epoch, shape_indices, n_shapes, random_or_not if needed
     elif decoder_type == "deep_sdf": 
         model_datetime = 'chairs'
         shapecode, shapecode_epoch = get_deep_sdf_shapecodes(experiment_directory=f"../DeepSDF2/examples/{model_datetime}", checkpoint="latest")
-        
-    ################ 2. define training parameters ################
+    clip_embeddings = get_clip_encodings()  
+    ################ 2. define training parameters ################   
     learning_rate = 1e-5
     beta1 = 0.9
     beta2 = 0.9
@@ -91,17 +162,12 @@ def main():
     n_steps = 30000
     beta_schedule = 'linear' # 'linear', 'quad', 'sigmoid', 'cosine'
     # normalize latent vectors
-    print(shapecode.shape)
-    print(shapecode)
+    #print(shapecode.shape)
+    #print(shapecode)
     std = np.std(np.asarray(shapecode))
     mean = np.mean(np.asarray(shapecode))
     shapecode = (shapecode-mean)/std
-    print(shapecode)
-
-    ################ 3. specify model to continue training from ################
-    continue_training = False
-    continuing_model = '10312022_010352'
-    continuing_model_dt = 4800
+    #print(shapecode)
 
     # beta scheduling
     betas = make_beta_schedule(schedule=beta_schedule, n_timesteps=n_steps, start=1e-5, end=1e-2) 
@@ -115,12 +181,10 @@ def main():
     
     # initialize  the model, optimizer, EMA
     model = ConditionalModel(n_steps).cuda()
-    if continue_training:
-        model.load_state_dict(torch.load(f'./diffusion logs & models/{continuing_model}/conditional model_{continuing_model}_{continuing_model_dt}'))
-
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, betas=(beta1, beta2), eps=eps)
     ema = EMA(0.9)
     ema.register(model)
+    min_loss = 1000
     
     # register logs 
     dt = datetime.now() 
@@ -134,7 +198,11 @@ def main():
     fileHandler = logging.FileHandler(f'./diffusion logs & models/{dt}/{dt}.log')
     fileHandler.setFormatter(formatter)
     logger.addHandler(fileHandler)
-        
+    streamHandler = logging.StreamHandler()
+    streamHandler.setFormatter(formatter)
+    logger.addHandler(streamHandler)
+
+    
     # log training parameters
     logger.info(f'Decoder model type = {decoder_type}')
     logger.info(f'Decoder model used = {model_datetime}')
@@ -150,26 +218,28 @@ def main():
     logger.info(f'Optimzer = {optimizer.__class__.__name__}')
     logger.info(f'Batch size = {batch_size}')
     logger.info(f'Beta schedule = {beta_schedule}')
-    logger.info(f'Contine training = {continue_training}')
-    if continue_training:
-        logger.info(f'Continuing model = {continuing_model}')
-        logger.info(f'Cntinuing model dt = {continuing_model_dt}')
-    
-    loss_list = []
+    logger.info(f'Loss Function = err = x_cond-x+ output*am1')
 
     # starts training
-    print("starts training")
     for t in range(300000):
         # X is a torch Variable
         permutation = torch.randperm(shapecode.size()[0])
+        #permutation_conditioning = torch.randperm(shapecode.size()[0])
         epoch_loss = 0
         for i in range(0, shapecode.size()[0], batch_size):
             # Retrieve current batch
             indices = permutation[i:i+batch_size]
+            indices_conditioning = torch.randint(0, shapecode.size()[0], (indices.size()[0],))
+            #permutation_conditioning[i:i+batch_size]
             batch_x = shapecode[indices].cuda()
+            batch_x_conditioning = shapecode[indices_conditioning].cuda()
+            ### transform shapecodes into clip image codes ####
+            batch_clip_conditioning = clip_embeddings[indices_conditioning].cuda()
             # Compute the loss.
             # loss = noise_estimation_loss(model, batch_x,e)
-            loss = noise_estimation_loss(model, batch_x, n_steps, alphas_bar_sqrt, one_minus_alphas_bar_sqrt)
+            loss = noise_estimation_loss(model, batch_x, batch_x_conditioning, batch_clip_conditioning, n_steps, alphas_bar_sqrt, one_minus_alphas_bar_sqrt)
+            #loss = noise_estimation_loss(model, batch_x, batch_clip_conditioning, n_steps, alphas_bar_sqrt, one_minus_alphas_bar_sqrt)
+            #wandb.log({"loss": loss})
             epoch_loss += loss * indices.shape[0]
             # Before the backward pass, zero all of the network gradients
             optimizer.zero_grad()
@@ -181,17 +251,16 @@ def main():
             optimizer.step()
             # Update the exponential moving average
             ema.update(model)
-            
-        loss_list.append(loss.item())
 
         epoch_loss = epoch_loss / shapecode.size()[0]
-        if (t % 100 == 0):
-            for k, this_loss in enumerate(loss_list):
-                logger.info(f'{k + t - len(loss_list) + 1} loss = {this_loss}')
-            if loss.item() < 0.01:
-                torch.save(model.state_dict(), f'./diffusion logs & models/{dt}/conditional model_{dt}_{t}')
-        if loss.item() < 0.002:
-            torch.save(model.state_dict(), f'./diffusion logs & models/{dt}/conditional model_{dt}_{t}')
+        wandb.log({"loss": epoch_loss})
+        #wandb.watch(model)
+        #if (t % 100 == 0):
+        logger.info(f'{t} loss = {epoch_loss.item()}')
+        if epoch_loss < min_loss:
+            min_loss = epoch_loss
+        #if loss < 0.01:
+            torch.save(model.state_dict(), f'./diffusion logs & models/{dt}/clip_conditional model_{dt}_{t}')
 
 if __name__ == "__main__":
     main()
